@@ -69,6 +69,7 @@ class PDFBeads::PDFBuilder
     labels = PDFLabels.new( @pdfargs[:labels] ) unless @pdfargs[:labels].nil?
     toc    = PDFTOC.new( @pdfargs[:toc] ) unless @pdfargs[:toc].nil?
     meta   = parseMeta( @pdfargs[:meta] )
+    reader = getPDFReader( @pdfargs[:textpdf] )
 
     cat = XObj.new(Hash[
       'Type'       => '/Catalog',
@@ -98,12 +99,12 @@ class PDFBeads::PDFBuilder
       info.addToDict(key, "(\xFE\xFF#{meta[key].to_text})")
     end
 
-    out = XObj.new(Hash[
-      'Type'  => '/Outlines',
-      'Count' => 0
-    ])
-    @doc.addObject(out)
-    cat.addToDict('Outlines', ref(out.getID))
+    if ( toc != nil and toc.length > 0 ) or @pdfargs[:rtl]
+      vpref = XObj.new(Hash.new())
+      vpref.addToDict('Direction', "/R2L") if @pdfargs[:rtl]
+      @doc.addObject(vpref)
+      cat.addToDict('ViewerPreferences', ref(vpref.getID))
+    end
 
     pages = XObj.new(Hash[
       'Type' => '/Pages'
@@ -150,9 +151,14 @@ class PDFBeads::PDFBuilder
           begin
             # If possible, use iso8859-1 (aka PDFDocEncoding) for page labels:
             # it is at least guaranteed to be safe
-            ltitl = Iconv.iconv( "iso8859-1", "utf-8", rng[:prefix] ).first
+            if rng[:prefix].respond_to? :encode
+              ltitl = rng[:prefix].encode( "iso8859-1", "utf-8" )
+            else
+              ltitl = Iconv.iconv( "iso8859-1", "utf-8", rng[:prefix] ).first
+            end
             nTree << "/P (#{ltitl.to_text}) "
-          rescue Iconv::InvalidCharacter, Iconv::IllegalSequence
+          # Iconv::InvalidCharacter, Iconv::IllegalSequence, Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError
+          rescue
             ltitl = Iconv.iconv( "utf-16be", "utf-8", rng[:prefix] ).first
             # If there is no number (just prefix) then put a zero character after the prefix:
             # this makes acroread happy, but prevents displaying the number in evince
@@ -176,27 +182,31 @@ class PDFBeads::PDFBuilder
 
     needs_font = false
     fonts = encodings = nil
-    pagefiles.each do |p|
-      unless p.hocr_path.nil?
-        needs_font = true
-        break
+    unless reader.nil?
+      fdict = importPDFFonts( reader,@pdfargs[:textpdf] )
+    else
+      pagefiles.each do |p|
+        unless p.hocr_path.nil?
+          needs_font = true
+          break
+        end
       end
-    end
 
-    if needs_font
-      fonts = Array.new()
-      encodings = [ [' '] ]
-      fdict = XObj.new( Hash[] )
-      @doc.addObject( fdict )
+      if needs_font
+        fonts = Array.new()
+        encodings = [ [' '] ]
+        fdict = XObj.new( Hash[] )
+        @doc.addObject( fdict )
 
-      descr = XObj.new( Hash[
-        'Type'     => '/FontDescriptor',
-        'BaseFont' => '/Times-Roman',
-        ] )
-      @fdata.header.each_key do |key|
-        descr.addToDict( key,@fdata.header[key] )
+        descr = XObj.new( Hash[
+          'Type'     => '/FontDescriptor',
+          'BaseFont' => '/Times-Roman',
+          ] )
+        @fdata.header.each_key do |key|
+          descr.addToDict( key,@fdata.header[key] )
+        end
+        @doc.addObject( descr )
       end
-      @doc.addObject( descr )
     end
 
     pagefiles.each do |p|
@@ -261,17 +271,24 @@ class PDFBeads::PDFBuilder
       doc_objs.concat( [contents, resobj, resources] )
 
       hocr = nil
-      unless p.hocr_path.nil?
-        hocr = open( p.hocr_path ) { |f| Nokogiri.parse( f ) }
+      if not reader.nil?
         procSet << '/Text'
-        c_str   << getPDFText( hocr,pheight,72.0/xres,72.0/yres,encodings )
+        c_str   << getPDFText( reader,pidx,@pdfargs[:debug] )
+      elsif not p.hocr_path.nil?
+        hocr = open( p.hocr_path ) { |f| Nokogiri::HTML( f ) }
+        procSet << '/Text'
+        c_str   << getHOCRText( hocr,pheight,72.0/xres,72.0/yres,encodings )
       end
 
-      contents.reinit( Hash[
-        'Filter' => '/FlateDecode'
-      ], Zlib::Deflate.deflate( c_str,9 ) )
+      unless @pdfargs[:debug]
+        contents.reinit( Hash[
+          'Filter' => '/FlateDecode'
+        ], Zlib::Deflate.deflate( c_str,9 ) )
+      else
+        contents.reinit( Hash[], c_str )
+      end
       resources.addToDict( 'ProcSet', "[ #{procSet.join(' ')} ]" )
-      resources.addToDict( 'Font', ref( fdict.getID ) ) unless hocr.nil?
+      resources.addToDict( 'Font', ref( fdict.getID ) ) unless hocr.nil? and reader.nil?
 
       page = XObj.new(Hash[
         'Type'      => '/Page',
@@ -325,6 +342,7 @@ class PDFBeads::PDFBuilder
       getOutlineObjs( toc,pages_by_num,page_objs[0].getID )
       cat.addToDict('Outlines', ref(toc[0][:pdfobj].getID))
       cat.addToDict('PageMode', "/UseOutlines")
+      vpref.addToDict('NonFullScreenPageMode', "/UseOutlines")
     end
 
     if @pdfargs[:delfiles]
@@ -381,7 +399,11 @@ class PDFBeads::PDFBuilder
           key = $1
           if keys.include? key
             begin
-              ret[key] = Iconv.iconv( "utf-16be", "utf-8", $2 ).first
+              if $2.respond_to? :encode
+                ret[key] = $2.encode( "utf-16be", "utf-8" )
+              else
+                ret[key] = Iconv.iconv( "utf-16be", "utf-8", $2 ).first
+              end
             rescue
               $stderr.puts("Error: metadata should be specified in utf-8")
             end
@@ -390,6 +412,171 @@ class PDFBeads::PDFBuilder
       end
     end
     ret
+  end
+
+  def getPDFReader( path )
+    return nil if path.nil? or path.eql? ''
+    return nil unless File.file? path
+
+    PDF::Reader.new( path )
+  end
+
+  def encodePDFArray( in_a )
+    out_a = Array.new()
+    out_a << '['
+    in_a.each do |item|
+      if item.is_a? String
+        out_a << ( '(' << item.to_s << ')' )
+      elsif item.is_a? Symbol
+        out_a << ( '/' << item.to_s )
+      elsif item.is_a? Array
+        out_a << encodePDFArray( item )
+      else
+        out_a << item.to_s
+      end
+    end
+    out_a << ']'
+    out_a.join( ' ' )
+  end
+
+  def encodePDFObjEntry( inhash,outobj,label )
+    if inhash[label].is_a? String
+      outobj.addToDict( label,"(#{inhash[label]})" )
+
+    elsif inhash[label].is_a? Symbol
+      outobj.addToDict( label,"/#{inhash[label]}" )
+
+    elsif inhash[label].is_a? Integer
+      outobj.addToDict( label,"#{inhash[label]}" )
+
+    elsif inhash[label].is_a? Array
+      outobj.addToDict( label,encodePDFArray( inhash[label] ) )
+
+    elsif inhash[label].is_a? Hash
+      newobj = XObj.new( Hash.new() )
+      @doc.addObject( newobj )
+      outobj.addToDict( label,ref(newobj.getID) )
+      inhash[label].keys.each do |newlabel|
+        encodePDFObjEntry( inhash[label],newobj,newlabel )
+      end
+
+    elsif inhash[label].is_a? PDF::Reader::Stream
+      newobj = XObj.new( Hash.new(),inhash[label].data )
+      @doc.addObject( newobj )
+      outobj.addToDict( label,ref(newobj.getID) )
+      inhash[label].hash.keys.each do |newlabel|
+        encodePDFObjEntry( inhash[label].hash,newobj,newlabel ) unless newlabel.eql? :Length
+      end
+    end
+  end
+
+  def importPDFFont( label,font )
+    fontobj = XObj.new( Hash.new() )
+    fontobj.addToDict( 'Name',"/#{label}" ) unless label.nil?
+    @doc.addObject( fontobj )
+
+    if font.has_key? :DescendantFonts
+      dfonts = Array.new()
+      font[:DescendantFonts].each {|dfont| dfonts << importPDFFont( nil,dfont ) }
+      fontobj.addToDict( "DescendantFonts",'[ ' << dfonts.map{|dfont| ref(dfont.getID)}.join(' ') << ' ]' )
+    end
+
+    [ :BaseFont, :Type, :Subtype, :FirstChar, :LastChar, :Widths, :FontDescriptor,
+      :Encoding, :ToUnicode, :DW, :W, :CIDSystemInfo, :CIDToGIDMap ].each do |fontkey|
+      encodePDFObjEntry( font,fontobj,fontkey ) if font.has_key? fontkey
+    end
+    fontobj
+  end
+
+  def importPDFFonts( reader,path )
+    fonts = Hash.new()
+    reader.pages.each_index do |i|
+      $stderr.puts("Reading font data from #{path}: page #{i}\n")
+      page = reader.pages[i]
+      page.fonts.each do |label,font|
+        fonts[label] = page.objects.deref( font ) unless fonts.has_key? label
+      end
+    end
+
+    fdict = XObj.new( Hash[] )
+    @doc.addObject( fdict )
+    fonts.keys.sort_by {|sym| sym.to_s}.each do |label|
+      fontobj = importPDFFont( label,fonts[label] )
+      fdict.addToDict( label,ref(fontobj.getID) )
+    end
+    fdict
+  end
+
+  def getPDFText( reader,pidx,debug )
+    return "" unless reader.pages.length > pidx
+
+    page = reader.pages[pidx]
+    pcont = page.raw_content.to_binary()
+    cidx = 0
+    in_t = false
+    pstack = 0
+    prevc = "\0"
+    ch_start = -1
+    ret = ""
+    tr_val = debug ? 0 : 3
+
+    pcont.each_byte do |char|
+      if char.chr.eql? '('
+        ctx = pcont[0,cidx].match( /\\+$/ )
+        pstack += 1 if ( ctx.nil? or ctx[0].length % 2 == 0 )
+      elsif char.chr.eql? ')'
+        ctx = pcont[0,cidx].match( /\\+$/ )
+        pstack -= 1 if ( ctx.nil? or ctx[0].length % 2 == 0 )
+      end
+
+      unless pstack > 0
+        # Text state operators may occur outside text objects. We have to take care of this
+        if not in_t and prevc.eql? 'T'
+          case char.chr
+            when 'c'
+              if pcont[0,cidx-1] =~ /([-+]?\d*\.?\d+)\s+$/
+                ret << " #{$1} Tc"
+              end
+            when 'w'
+              if pcont[0,cidx-1] =~ /([-+]?\d*\.?\d+)\s+$/
+                ret << " #{$1} Tw"
+              end
+            when 'z'
+              if pcont[0,cidx-1] =~ /([-+]?\d*\.?\d+)\s+$/
+                ret << " #{$1} Tz"
+              end
+            when 'L'
+              if pcont[0,cidx-1] =~ /([-+]?\d*\.?\d+)\s+$/
+                ret << " #{$1} TL"
+              end
+            when 'f'
+              if pcont[0,cidx-1] =~ /\/([A-Za-z0-9]+)\s+([-+]?\d*\.?\d+)\s+$/
+                ret << " /#{$1} #{$2} Tf"
+              end
+            # Tr operators are ignored, since we always need either a hidden text (3 Tr)
+            # or (for debugging purposes) a visible text without special effects (0 Tr)
+            when 's'
+              if pcont[0,cidx-1] =~ /([-+]?\d*\.?\d+)\s+$/
+                chunks << " #{$1} Ts"
+              end
+          end
+        elsif not in_t and ( prevc + char.chr ).eql? 'BT'
+          ch_start = cidx -1
+          in_t = true
+        elsif in_t and ( prevc + char.chr ).eql? 'ET'
+          chunk = pcont.slice( ch_start,cidx - ch_start + 1 )
+          chunk.gsub!( /\d{1}\s+Tr/,"#{tr_val} Tr" )
+          ret << "\n" << chunk
+          ch_start = -1
+          in_t = false
+        end
+      end
+
+      prevc = char.chr
+      cidx += 1
+    end
+    return "\nq #{tr_val} Tr" << ret << " Q" if ret.length > 0
+    return ""
   end
 
   def getOutlineObjs( toc,page_ids,fp_id )
@@ -454,7 +641,7 @@ class PDFBeads::PDFBuilder
     out = [0,0,0,0]
 
     if element.attributes.has_key? 'title'
-      if /bbox((?:\s+\d+){4})/.match(element.attributes['title'].value)
+      if /bbox((\s+\d+){4})/.match(element.attributes['title'].content)
         coords = $1.strip.split(/\s+/)
         out = [ (coords[0].to_i*xscale).to_f,(coords[1].to_i*xscale).to_f,
                 (coords[2].to_i*yscale).to_f,(coords[3].to_i*yscale).to_f ]
@@ -463,23 +650,16 @@ class PDFBeads::PDFBuilder
     return out
   end
 
-  def elementText( elem,charset )
-    txt = ''
-    begin
-      txt = elem.text.strip
-      txt = Iconv.iconv( 'utf-8',charset,txt ).first unless charset.downcase.eql? 'utf-8'
-    rescue
-    end
-
-    txt.force_encoding( 'utf-8' ) if txt.respond_to? :force_encoding
-    return txt
+  def elementText( elem )
+    # used to put some Iconv stuff here, but nokogiri makes this conversion itself
+    return elem.inner_text.strip
   end
 
-  def getOCRUnits( ocr_line,lbbox,fsize,charset,xscale,yscale )
+  def getOCRUnits( ocr_line,lbbox,fsize,xscale,yscale )
     units = Array.new()
-    ocr_words = ocr_line.search("span[@class='ocrx_word']")
+    ocr_words = ocr_line.xpath(".//span[@class='ocrx_word']")
     ocr_chars = nil
-    ocr_chars = ocr_line.at("span[@class='ocr_cinfo']") if ocr_words.length == 0
+    ocr_chars = ocr_line.at_xpath(".//span[@class='ocr_cinfo']") if ocr_words.length == 0
 
     # If 'ocrx_word' elements are available (as in Tesseract owtput), split the line
     # into individual words
@@ -487,16 +667,16 @@ class PDFBeads::PDFBuilder
       ocr_words.each do |word|
         bbox = elementCoordinates( word,xscale,yscale )
         next if bbox == [0,0,0,0]
-        txt = elementText( word,charset )
+        txt = elementText( word )
         units << [txt,bbox]
       end
 
     # If 'ocrx_cinfo' data is available (as in Cuneiform) owtput, then split it
     # into individual characters and then combine them into words
     elsif not ocr_chars.nil? and ocr_chars.attributes.has_key? 'title'
-      if /x_bboxes([-\s\d]+)/.match( ocr_chars.attributes['title'].value )
+      if /x_bboxes([-\s\d]+)/.match( ocr_chars.attributes['title'].content )
         coords = $1.strip.split(/\s+/)
-        ltxt = elementText( ocr_line,charset )
+        ltxt = elementText( ocr_line )
         charcnt = 0
         ltxt.each_char { |uc| charcnt += 1 }
 
@@ -521,10 +701,11 @@ class PDFBeads::PDFBuilder
               if /^\s+$/.match( uc )
                 wtxt = ''
 
-              # A workaround for probable hpricot bug, which sometimes causes whitespace
-              # characters from inside a string to be stripped. So if we find
-              # a bounding box with negative values we assume there was a whitespace
-              # character here, even if not preserved in the string itself
+              # A workaround for probable hpricot bug (TODO: is Nokogiri affected?),
+              # which sometimes causes whitespace characters from inside a string
+              # to be stripped. So if we find a bounding box with negative values
+              # we assume there was a whitespace character here, even if not
+              # preserved in the string itself
               else
                 wtxt = uc
                 i += 1
@@ -541,36 +722,23 @@ class PDFBeads::PDFBuilder
 
     # If neither word nor character bounding boxes are available, then store the line as a whole
     if units.length == 0
-      ltxt = elementText( ocr_line,charset )
+      ltxt = elementText( ocr_line )
       units << [ltxt,lbbox] unless ltxt.eql? ''
     end
 
     units[units.length-1][0].sub!( /-\Z/, "\xC2\xAD" ) unless units.length == 0
-
-    # Ignore tesseract's faulty hocr output. Stolen from
-    # https://github.com/steelThread/mimeograph/commits/master/src/patched_pdfbeads.rb
-    #
-    units.delete_if {|unit| "".eql? unit[0] }
-
     return units
   end
 
-  def getPDFText( hocr,pheight,xscale,yscale,encodings )
+  def getHOCRText( hocr,pheight,xscale,yscale,encodings )
     fsize = 10
     cur_enc = nil
     ret = " BT 3 Tr "
 
-    charset = 'utf-8'
-    hocr.search("//meta[@http-equiv='Content-Type']").each do |el|
-      attrs = el.attributes
-      charset = $1 if attrs.has_key? 'content' and
-        /\Atext\/html;\s*charset=([A-Za-z0-9-]+)\Z/i.match( attrs['content'].value )
-    end
-
-    hocr.search("//span[@class='ocr_line']").each do |line|
+    hocr.xpath("//span[@class='ocr_line']").each do |line|
       lbbox = elementCoordinates( line,xscale,yscale )
       next if lbbox[2] - lbbox[0] <= 0 or lbbox[3] - lbbox[1] <= 0
-      units = getOCRUnits( line,lbbox,fsize,charset,xscale,yscale )
+      units = getOCRUnits( line,lbbox,fsize,xscale,yscale )
       next if units.length == 0
 
       wwidth = 0
@@ -579,7 +747,9 @@ class PDFBeads::PDFBuilder
         ltxt << unit[0]
         wwidth += ( unit[1][2] - unit[1][0] )
       end
-      ratio = wwidth / @fdata.getLineWidth( ltxt,fsize )
+      lw = @fdata.getLineWidth( ltxt,fsize )
+      ratio = 1
+      ratio = wwidth / lw unless lw == 0
       pos = lbbox[0]
       posdiff = 0
 
@@ -598,7 +768,11 @@ class PDFBeads::PDFBuilder
         txt8 = ''
         wtxt.each_char do |char|
           begin
-            Iconv.iconv( "utf-16be","utf-8",char )
+            if char.respond_to? :encode
+              char.encode!( "utf-16be", "utf-8" )
+            else
+              Iconv.iconv( "utf-16be","utf-8",char )
+            end
           rescue
             rawbytes = char.unpack( 'C*' )
             bs = ''

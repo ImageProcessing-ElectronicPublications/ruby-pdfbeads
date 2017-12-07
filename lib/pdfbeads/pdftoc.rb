@@ -101,7 +101,11 @@ class PDFBeads::PDFBuilder::PDFTOC < Array
           title = parts[0].gsub(/\A"/m,"").gsub(/"\Z/m, "")
           ref   = parts[1].gsub(/\A"/m,"").gsub(/"\Z/m, "")
           begin
-            title = Iconv.iconv( "utf-16be", "utf-8", title ).first
+            if title.respond_to? :encode
+              title.encode!( "utf-16be", "utf-8" )
+            else
+              title = Iconv.iconv( "utf-16be", "utf-8", title ).first
+            end
           rescue
             $stderr.puts("Error: TOC should be specified in utf-8")
             return
