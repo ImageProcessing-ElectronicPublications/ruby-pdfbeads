@@ -30,7 +30,7 @@
 #
 #######################################################################
 
-# Represents a set of page images accompanies with auxiliary files
+# Represents a set of page images accompanied with auxiliary files
 # needed to build a PDF document.
 class PDFBeads::PageDataProvider < Array
 
@@ -117,8 +117,8 @@ class PDFBeads::PageDataProvider < Array
         @bg_layer = bgpath unless bgpath.nil?
 
         # If updating auxiliary files is requested and the base image is
-        # either monochrome or indexed with just a few colors (i. e. doesn't
-        # contain any elements which should be encoded to the background layer),
+        # either bitonal or indexed with just a few colors (i. e. doesn't
+        # contain any elements which should be placed to the background layer),
         # then the *.color.* image (if present) takes priority over any existing
         # *.bg.* and *.fg.* images. So we should regenerate them.
         if bgpath.nil? or ( force and not @s_type.eql? 'c' )
@@ -139,8 +139,10 @@ class PDFBeads::PageDataProvider < Array
         @fg_layer = fgpath unless fgpath.nil?
       end
 
-      @hocr_path = Dir.entries('.').detect do |f|
-        /\A#{@basename}.(HOCR|HTML?)/i.match(f)
+      if $has_nokogiri and not @pageargs[:pages_per_dict].nil?
+        @hocr_path = Dir.entries('.').detect do |f|
+          /\A#{@basename}.(HOCR|HTML?)/i.match(f)
+        end
       end
     end
 
@@ -253,8 +255,8 @@ class PDFBeads::PageDataProvider < Array
 
         # A hack for some Windows versions of RMagick, which throw an error the
         # first time when Magick.formats is accessed
-        retries = 2
         begin
+          retries = 2
           mfmts = Magick.formats
         rescue
           retry if (retries -= 1 ) > 0
@@ -351,7 +353,7 @@ class PDFBeads::PageDataProvider < Array
         # to achieve the desired color diffusion. The idea is inspired by
         # Anthony Thyssen's http://www.imagemagick.org/Usage/scripts/hole_fill_shepards
         # script, which is intended just for this purpose (i. e. removing undesired
-        # areas from the image). However our approach is a bit cruder (but still
+        # areas from the image). However our approach is a bit more crude (but still
         # effective).
         fg.resize!( width=imw/100,height=imh/100,filter=GaussianFilter )
         fg.resize!( width=imw,height=imh,filter=GaussianFilter )
@@ -401,8 +403,8 @@ class PDFBeads::PageDataProvider < Array
 
     # A hack for some Windows versions of RMagick, which throw an error the
     # first time when Magick.formats is accessed
-    retries = 2
     begin
+      retries = 2
       mfmts = Magick.formats
     rescue
       retry if (retries -= 1 ) > 0
