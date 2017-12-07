@@ -30,16 +30,35 @@
 #
 #######################################################################
 
-require 'iconv'
 require 'zlib'
-require 'nokogiri'
 
 require 'RMagick'
 include Magick
 
+begin
+  require 'nokogiri'
+  $has_nokogiri = true
+rescue LoadError
+  $stderr.puts( "Warning: the nokogiri extension is not available. I'll not be able" )
+  $stderr.puts( "\tto create hidden text layer from hOCR files." )
+  $has_nokogiri = false
+end
+
+begin
+  require 'pdf/reader'
+  $has_pdfreader = true
+rescue LoadError
+  $has_pdfreader = false
+end
+
 unless ''.respond_to? :ord
   $KCODE = 'u'
   require 'jcode'
+end
+
+# Require iconv for Ruby version less than 1.9.3
+unless ''.respond_to? :encode
+  require 'iconv'
 end
 
 class String
@@ -78,7 +97,8 @@ end
 require 'imageinspector'
 
 module PDFBeads
-  require 'pdfbeads/version'
+  VERSION = '1.1.1'
   require 'pdfbeads/pdfbuilder'
   require 'pdfbeads/pdfpage'
 end
+
