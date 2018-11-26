@@ -57,7 +57,8 @@ pageargs = Hash[
   :st_format       => 'JBIG2',
   :pages_per_dict  => 15,
   :force_update    => false,
-  :force_grayscale => false
+  :force_grayscale => false,
+  :fraction_threshold => 0.85
 ]
 outpath = 'STDOUT'
 
@@ -106,6 +107,18 @@ OptionParser.new() do |opts|
       $stderr.puts( "Warning: the pdf/reader extension is not available." )
       $stderr.puts( "\tthe -T/--text-pdf option is ignored." )
     end
+  end
+
+  opts.on("-F", "--threshold-fraction VAL", 
+    "sets the fraction of pixels which have to match in", 
+    "order for two symbols to be classed the same. This",
+    "isn't strictly true, as there are other tests as well,",
+    "but increasing this will generally increase the number",
+    "of symbol classes. Valid values are between 0.1 and 1.0.",
+    "0.85 is used by default") do |fraction|
+
+    fval = fraction.to_f
+    pageargs[:fraction_threshold] = fval if ( (0.1..1.0).include? fval )
   end
 
   opts.separator "\n"
