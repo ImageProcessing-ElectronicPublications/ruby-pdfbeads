@@ -277,7 +277,7 @@ class PDFBeads::PDFBuilder
       elsif not p.hocr_path.nil?
         hocr = open( p.hocr_path ) { |f| Nokogiri::HTML( f ) }
         procSet << '/Text'
-        c_str   << getHOCRText( hocr,pheight,72.0/xres,72.0/yres,encodings )
+        c_str   << getHOCRText( hocr,pheight,72.0/p.x_res,72.0/p.y_res,encodings )
       end
 
       unless @pdfargs[:debug]

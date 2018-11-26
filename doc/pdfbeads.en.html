@@ -275,6 +275,10 @@ utility. You can run pdfbeads with the <tt>-p</tt> (<tt>--pages-per-dict</tt>)
 option in order to directly specify the desired number of PDF document
 pages using the common dictionary of shared symbols (15 by default).</p>
 
+<p>The jbig2enc utility can be greedy and recognize different characters as one.
+In this case, you can use the key <tt>-F</tt> (<tt>--threshold-fraction</tt>) 
+With valid values are between 0.1 and 1.0. (0.85 is used by default).</p>
+
 <p>If jbig2enc is not accessible to pdfbeads, then the CCITT Group 4 fax
 compression method will be used instead. It is also possible to explicitly
 request this compression type by specifying the <tt>-m</tt>

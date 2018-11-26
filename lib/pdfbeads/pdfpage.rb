@@ -431,6 +431,7 @@ class PDFBeads::PageDataProvider < Array
   def jbig2Encode()
     per_dict = @pageargs[:pages_per_dict]
     force = @pageargs[:force_update]
+    threshold = @pageargs[:fraction_threshold]
 
     has_jbig2 = false
     if /(win|w)32$/i.match( RUBY_PLATFORM )
@@ -476,7 +477,7 @@ class PDFBeads::PageDataProvider < Array
         # stage only if both the dictionary and each of the individual pages
         # are already found on the disk
         if needs_update
-          IO.popen("jbig2 -s -p " << toConvert.join(' ') ) do |f|
+          IO.popen("jbig2 -s -p -t #{threshold} " << toConvert.join(' ') ) do |f|
             out = f.gets
             $stderr.puts out unless out.nil?
           end
