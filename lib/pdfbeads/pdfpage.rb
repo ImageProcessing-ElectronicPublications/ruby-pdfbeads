@@ -477,11 +477,13 @@ class PDFBeads::PageDataProvider < Array
         # stage only if both the dictionary and each of the individual pages
         # are already found on the disk
         if needs_update
-          IO.popen("jbig2 -s -p -t #{threshold} " << toConvert.join(' ') ) do |f|
-            out = f.gets
-            $stderr.puts out unless out.nil?
-          end
-          return false if $?.exitstatus > 0
+          exit_status = 0
+          Open3.popen3("jbig2 -s -p -t #{threshold} " << toConvert.join(' ')){|stdin, stdout, stderr, wait_thr|
+            puts "#{stdout.read}"
+            puts "#{stderr.read}"
+            exit_status = wait_thr.value.exitstatus
+          }
+          return false if exit_status > 0
 
           toConvert.each_index do |j|
             oname = sprintf( "output.%04d",j )

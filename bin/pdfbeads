@@ -32,8 +32,8 @@
 #######################################################################
 
 require 'optparse'
-require 'iconv'
 require 'time'
+require 'multiio'
 
 require 'pdfbeads'
 include PDFBeads
@@ -46,7 +46,9 @@ pdfargs  = Hash[
   :textpdf        => nil,
   :delfiles       => false,
   :debug          => false,
-  :rtl            => false
+  :rtl            => false,
+  :is_log         => false,
+  :file_for_log   => 'out.log'
 ]
 pageargs = Hash[
   :threshold       => 1,
@@ -66,7 +68,7 @@ OptionParser.new() do |opts|
   opts.set_summary_width(24)
   opts.set_summary_indent("  ")
 
-  opts.banner = "Usage: pdfbeads [options] [files to process] > out.pdf"
+  opts.banner = "Usage:\tpdfbeads [options] [files to process] -o out.pdf\n\tor\n\tpdfbeads [options] [files to process] > out.pdf"
 
   opts.separator "\n"
   opts.separator "PDF file properties:\n"
@@ -216,6 +218,12 @@ OptionParser.new() do |opts|
                 "text layer visible and using uncompressed page streams") do |dbg|
     pdfargs[:debug] = dbg
   end
+  opts.on("-l", "--log FILE", 
+                "Save to FILE, STDOUT and STDERR.",
+                "Works only when the option -o / --output is set") do |f|
+    pdfargs[:file_for_log] = f
+    pdfargs[:is_log] = true
+  end
   opts.on_tail("-h", "--help", "Show this message") do
     puts opts
     exit
@@ -228,6 +236,16 @@ if ARGV.length == 0
   files = Dir.glob("*").sort
 else
   files = ARGV.sort
+end
+
+if pdfargs[:is_log]
+  if outpath.eql? 'STDOUT'
+    $stderr.puts( "Warning: option -o / --output is not set." )
+    $stderr.puts( "\tthe -l / --log option is ignored." )
+  else
+    STDOUT.reopen MultiIO.instance(pdfargs[:file_for_log]).setTargets([STDOUT,STDERR])
+    STDERR.reopen STDOUT 
+  end
 end
 
 pages = PageDataProvider.new( files,pageargs )
