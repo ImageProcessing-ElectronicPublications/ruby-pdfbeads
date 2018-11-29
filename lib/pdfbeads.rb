@@ -32,7 +32,7 @@
 
 require 'zlib'
 
-require 'RMagick'
+require 'rmagick'
 include Magick
 
 begin
