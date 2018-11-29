@@ -31,7 +31,7 @@
 #######################################################################
 
 require 'zlib'
-
+require 'open3'
 require 'rmagick'
 include Magick
 
