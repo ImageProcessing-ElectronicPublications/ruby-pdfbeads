@@ -22,7 +22,7 @@ class MultiIO < File
   end
 
   def puts(str)
-    write "#{str}"
+    write "#{Time.now}> #{str}"
   end
 
   def write(str)
@@ -38,7 +38,9 @@ class MultiIO < File
        @@targets.push STDERR.clone if t == STDERR
        break if t == STDOUT or t == STDERR  
     end
-    @@targets.push(File.open(@@path,'w+'))
+    log = File.open(@@path,'a+')
+    log.sync = true
+    @@targets.push(log)
     self
   end
 
