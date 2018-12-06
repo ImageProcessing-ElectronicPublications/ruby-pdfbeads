@@ -478,9 +478,11 @@ class PDFBeads::PageDataProvider < Array
         # are already found on the disk
         if needs_update
           exit_status = 0
-          Open3.popen3("jbig2 -s -p -t #{threshold} " << toConvert.join(' ')){|stdin, stdout, stderr, wait_thr|
-            puts "#{stdout.read}"
-            puts "#{stderr.read}"
+          Open3.popen2e("jbig2 -s -p -t #{threshold} " << toConvert.join(' ')){|stdin, stdout_and_stderr, wait_thr|
+            stdout_and_stderr.sync = true
+            while l = stdout_and_stderr.gets
+              puts l
+            end
             exit_status = wait_thr.value.exitstatus
           }
           return false if exit_status > 0
