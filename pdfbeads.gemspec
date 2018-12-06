@@ -1,7 +1,7 @@
 ######################################################################
 #
 # PDFBeads -- convert scanned images to a single PDF file
-# Version 1.0
+# Version 1.1.2
 #
 # Unlike other PDF creation tools, this utility attempts to implement
 # the approach typically used for DjVu books. Its key feature is
@@ -30,7 +30,7 @@
 
 spec = Gem::Specification.new do |s|
   s.name = 'pdfbeads'
-  s.version = '1.1.1'
+  s.version = '1.1.2'
   s.summary = "PDFBeads -- convert scanned images to a single PDF file."
   s.description = <<-EOF
     PDFBeads is a small utility written in Ruby which takes scanned
