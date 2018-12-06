@@ -22,7 +22,7 @@ class MultiIO < File
   end
 
   def puts(str)
-    write "#{str}"
+    write "#{Time.now}> #{str}"
   end
 
   def write(str)
